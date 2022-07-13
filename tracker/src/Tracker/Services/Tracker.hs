@@ -50,7 +50,7 @@ getAllTransactions' Explorer{..} Cache{..} l@Logging{..} TrackerSettings{..} ret
   _ <- infoM $ "Got next txn batch: " ++ (show $ length items)
   let 
     cardanoTxn = fmap mkFromExplorer items
-    newIndex = fromMaybe lastIndex (fmap (\FullTx{..} -> (fromInteger $ unGix globalIndex) + 1) (lastMaybe items))
+    newIndex = fromMaybe lastIndex (fmap (\FullTx{..} -> fromInteger $ unGix globalIndex) (lastMaybe items))
   _ <- infoM $ "New index is: " ++ show newIndex
   
   return (cardanoTxn, newIndex)
