@@ -1,42 +1,55 @@
 module Tracker.Programs.TrackerProgram where
 
-import Tracker.Services.Tracker
-import Tracker.Caches.Cache
-import Tracker.Models.AppConfig
-import Tracker.Syntax.Option
-import Tracker.Models.ExecutedOrders
-import Tracker.Models.SettledTx
-import qualified Tracker.Models.Interop.Pool as Interop
-import Tracker.Models.Events.PoolEvent
-import Tracker.Models.Interop.Class
-import Tracker.Models.Events.AnyEOrder
-import Tracker.Models.Events.Class
-
-import Streaming.Producer
-import Streaming.Types
-
-import ErgoDex.Class
-import ErgoDex.Amm.Pool
-import ErgoDex.State
-
-import Explorer.Class
-
-import CardanoTx.Models
-
-import System.Logging.Hlog
-import GHC.Natural
+import RIO hiding 
+  ( elem )
+import System.Time.Extra 
+  ( sleep )
 import qualified Streamly.Prelude as S
-import           RIO
-import           Control.Monad.Catch
-import qualified Data.ByteString.Lazy.Char8 as C
-import Data.Aeson
+
+import Streaming.Producer 
+  ( Producer(produce) )
+import System.Logging.Hlog 
+  ( Logging(..), MakeLogging(..) )
+
+import ErgoDex.Class    
+  ( FromLedger(parseFromLedger) )
+import ErgoDex.Amm.Pool 
+  ( Pool(..) )
+import ErgoDex.State    
+  ( OnChain(OnChain) )
+import Explorer.Class   
+  ( FromExplorer(..) )
+import CardanoTx.Models 
+  ( FullTxOut(fullTxOutRef) )
+
+import Tracker.Services.Tracker 
+  ( TrackerService(..) )
+import Tracker.Caches.Cache     
+  ( Cache(..) )
+import Tracker.Models.AppConfig 
+  ( TrackerProgrammConfig(..) )
+import Tracker.Syntax.Option    
+  ( unNone )
+import Tracker.Models.ExecutedOrders
+  ( ExecutedRedeem, ExecutedDeposit, ExecutedSwap )
+import Tracker.Models.SettledTx
+  ( SettledTx(SettledTx, outputs, timestamp) )
+import Tracker.Models.Events.PoolEvent 
+  ( PoolEvent(PoolEvent) )
+import Tracker.Models.Interop.Class 
+  ( CardanoWrapper(wrap) )
+import Tracker.Models.Events.AnyEOrder 
+  ( AnyEOrder )
+import Tracker.Models.Events.Class 
+  ( MakeAnyOrder(..) )
+import qualified Tracker.Models.Interop.Pool as Interop
 
 data TrackerProgram f = TrackerProgram
   { run :: f ()
   }
 
 mkTrackerProgram
-  :: (Monad i, S.MonadAsync f, MonadCatch f)
+  :: (Monad i, MonadUnliftIO f)
   => TrackerProgrammConfig
   -> MakeLogging i f
   -> Cache f
@@ -49,7 +62,7 @@ mkTrackerProgram settings MakeLogging{..} cache tracker executedOrdersProducer p
   pure $ TrackerProgram $ run' settings logger cache tracker executedOrdersProducer poolsProducer
 
 run'
-  :: (S.MonadAsync f, MonadCatch f)
+  :: (MonadUnliftIO f)
   => TrackerProgrammConfig
   -> Logging f
   -> Cache f
@@ -57,46 +70,64 @@ run'
   -> Producer f String AnyEOrder
   -> Producer f String PoolEvent
   -> f ()
-run' TrackerProgrammConfig{..} logging@Logging{..} cache service executedOrdersProducer poolsProducer =
-    S.repeatM (process service cache logging executedOrdersProducer poolsProducer)
-  & S.delay (fromIntegral $ naturalToInt pollTime)
-  & S.handle (\(a :: SomeException) -> (lift . errorM $ ("tracker stream error: " ++ (show a)))) -- log.info here
-  & S.drain
+run' config logging@Logging{..} cache service executedOrdersProducer poolsProducer =
+    handle
+      (\(a :: SomeException) -> errorM ("tracke error: " ++ show a))
+      (process config service cache logging executedOrdersProducer poolsProducer)
 
 process
-  :: (Monad f)
-  => TrackerService f
+  :: (MonadIO f)
+  => TrackerProgrammConfig
+  -> TrackerService f
   -> Cache f
   -> Logging f
   -> Producer f String AnyEOrder
   -> Producer f String PoolEvent
   -> f ()
-process TrackerService{..} Cache{..} Logging{..} executedOrdersProducer poolsProducer = do
-  (transactions, index) <- getAllTransactions
+process cfg@TrackerProgrammConfig{..} service@TrackerService{..} cache@Cache{..} logging@Logging{..} executedOrdersProducer poolsProducer = do
+  getAllTransactions >>=
+    (\(transactions, newIndex, maxIndex) -> do
+      processTxBatch transactions logging executedOrdersProducer poolsProducer
+      putLastIndex newIndex
+      if newIndex == maxIndex
+        then
+          let sleepTime = fromIntegral pollTime
+          in debugM ("Reached max index. Sleep for " ++ show sleepTime) >> liftIO (sleep sleepTime)
+        else debugM @String "Max index wasn't reach. Going to get next batch"
+      process cfg service cache logging executedOrdersProducer poolsProducer
+    )
+
+processTxBatch
+  :: (Monad f)
+  => [SettledTx]
+  -> Logging f
+  -> Producer f String AnyEOrder
+  -> Producer f String PoolEvent
+  -> f ()
+processTxBatch transactions Logging{..} executedOrdersProducer poolsProducer = do
   let
     events =
         executedSwaps ++ executedDeposits ++ executedRedeems
       where
-        executedSwaps    = processExecutedOrder @ExecutedSwap  transactions
+        executedSwaps    = processExecutedOrder @ExecutedSwap transactions
         executedDeposits = processExecutedOrder @ExecutedDeposit transactions
         executedRedeems  = processExecutedOrder @ExecutedRedeem transactions
     pools = processPool transactions
-  _ <- infoM $ "Events are: "  ++ (show (length events))
-  _ <- unless (null events) (produce executedOrdersProducer (S.fromList events))
-  _ <- infoM $ "Pools are: "  ++ (show (length pools))
-  _ <- unless (null pools) (produce poolsProducer (S.fromList pools))
-  putLastIndex index
+  infoM $ "Events are: "  ++ show (length events)
+  unless (null events) (produce executedOrdersProducer (S.fromList events))
+  infoM $ "Pools are: "  ++ show (length pools)
+  unless (null pools) (produce poolsProducer (S.fromList pools))
 
 constantKafkaKey :: String
 constantKafkaKey = "kafka_key"
 
 processExecutedOrder :: forall b. (FromExplorer SettledTx b, MakeAnyOrder b AnyEOrder) => [SettledTx] -> [(String, AnyEOrder)]
 processExecutedOrder inputs =
-  let 
-    ordersMaybe = 
+  let
+    ordersMaybe =
       fmap (\elem ->
         case parseFromExplorer elem :: Maybe b of
-          Just order -> Just $ (constantKafkaKey, make order)
+          Just order -> Just (constantKafkaKey, make order)
           _          -> Nothing
         ) inputs
   in unNone ordersMaybe
@@ -112,14 +143,14 @@ processPool transactions =
                   { id            = wrap poolId
                   , reservesX     = poolReservesX
                   , reservesY     = poolReservesY
-                  , liquidity     = poolLiquidity 
-                  , x             = wrap poolCoinX 
-                  , y             = wrap poolCoinY 
-                  , lq            = wrap poolCoinLq 
-                  , fee           = wrap poolFee 
+                  , liquidity     = poolLiquidity
+                  , x             = wrap poolCoinX
+                  , y             = wrap poolCoinY
+                  , lq            = wrap poolCoinLq
+                  , fee           = wrap poolFee
                   , outCollateral = outCollateral
-                  } 
-              in Just ((show $ poolId), PoolEvent pool timestamp (fullTxOutRef out))
+                  }
+              in Just (show poolId, PoolEvent pool timestamp (fullTxOutRef out))
             _ -> Nothing
           ) outputs
       )

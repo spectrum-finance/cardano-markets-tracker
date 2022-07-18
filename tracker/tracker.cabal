@@ -119,6 +119,7 @@ library
                   , retry
                   , streaming-kafka
                   , plutus-ledger-api
+                  , extra
 
 executable tracker-app
     main-is: Main.hs
