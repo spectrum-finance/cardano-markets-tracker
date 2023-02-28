@@ -1,47 +1,43 @@
 module Tracker.Models.AppConfig where
 
-import Dhall
-import RIO
-import Explorer.Config
-import System.Logging.Hlog
-import Streaming.Config
+import Dhall 
+  ( Generic, Text, FromDhall, auto, input )
+import RIO 
+  ( fromMaybe, MonadIO(..) )
 
-data RedisSettings = RedisSettings
-  { redisHost :: String
-  , redisPort :: String 
-  } deriving (Generic)
+import qualified Data.Text as T
 
-instance FromDhall RedisSettings
+import System.Logging.Hlog 
+  ( LoggingConfig )
+import Streaming.Config 
+  ( KafkaProducerConfig )
 
-data TrackerSettings = TrackerSettings
-  { limit :: Natural
-  } deriving (Generic)
-
-instance FromDhall TrackerSettings
-
-data TrackerProgrammConfig = TrackerProgrammConfig
-  { pollTime :: Natural
-  } deriving (Generic)
-
-instance FromDhall TrackerProgrammConfig
-
-data RetryConfig = RetryConfig
-  { sleepTime :: Natural
-  } deriving (Generic)
-
-instance FromDhall RetryConfig
+import Spectrum.LedgerSync.Config 
+  ( LedgerSyncConfig )
+import Spectrum.Config 
+  ( EventSourceConfig )
+import Spectrum.EventSource.Persistence.Config
+  ( LedgerStoreConfig )
+import ErgoDex.ScriptsValidators 
+  ( ScriptsConfig )
 
 data AppConfig = AppConfig
-  { explorerConfig        :: ExplorerConfig
-  , ordersProducerConfig  :: KafkaProducerConfig
-  , poolsProducerConfig   :: KafkaProducerConfig
-  , ordersTopicName       :: Text
-  , poolsTopicName        :: Text
-  , trackerProgrammConfig :: TrackerProgrammConfig
-  , trackerSettings       :: TrackerSettings
-  , redisSettings         :: RedisSettings
-  , retry                 :: RetryConfig
-  , loggingConfig         :: LoggingConfig
+  { ordersProducerConfig   :: !KafkaProducerConfig
+  , ledgerSyncConfig       :: !LedgerSyncConfig
+  , poolsProducerConfig    :: !KafkaProducerConfig
+  , txEventsProducerConfig :: !KafkaProducerConfig
+  , nodeConfigPath         :: !FilePath
+  , ordersTopicName        :: !Text
+  , poolsTopicName         :: !Text
+  , txEventsTopicName      :: !Text
+  , loggingConfig          :: !LoggingConfig
+  , eventSourceConfig      :: !EventSourceConfig
+  , lederHistoryConfig     :: !LedgerStoreConfig
+  , scriptsConfig          :: !ScriptsConfig
   } deriving (Generic)
 
 instance FromDhall AppConfig
+
+loadAppConfig :: MonadIO f => Maybe String -> f AppConfig
+loadAppConfig maybePath = liftIO $ input auto path
+  where path = T.pack $ fromMaybe "./tracker/resources/config.dhall" maybePath

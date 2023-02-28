@@ -1,16 +1,26 @@
 module Tracker.Models.Interop.Wrappers where
 
+import RIO 
+  ( fst, snd, Generic )
+import Data.Aeson 
+  ( FromJSON, ToJSON )
+
 import Plutus.V1.Ledger.Value as Value
-import PlutusTx.Builtins.Internal
+  ( AssetClass(..), CurrencySymbol(..), TokenName(..) )
+import PlutusTx.Builtins.Internal 
+  ( BuiltinByteString )
 
-import Tracker.Models.Interop.Class
+import Tracker.Models.Interop.Class 
+  ( CardanoWrapper(..) )
 
-import RIO
-import Data.Aeson
-
-import ErgoDex.Contracts.Types
+import ErgoDex.Contracts.Types 
+  ( Coin(..), Amount(..) )
 import ErgoDex.Amm.Pool 
+  ( PoolFee(..), PoolId(..) ) 
 import ErgoDex.Types
+  ( AssetAmount(..), AssetEntry(..) )
+
+-- interop between scala and haskell models
 
 newtype TokenNameWrapper = TokenNameWrapper
   { unTokenName :: BuiltinByteString

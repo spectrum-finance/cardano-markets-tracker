@@ -3,13 +3,16 @@ module Tracker.Services.ConfigReader
   , mkConfigReader
   ) where
 
-import Tracker.Models.AppConfig
-
 import Prelude
-import Dhall
-import Control.Monad.IO.Class
+import Dhall 
+  ( auto, input )
+import RIO 
+  ( MonadIO(..), fromMaybe )
+
 import qualified Data.Text as T
-import RIO
+
+import Tracker.Models.AppConfig 
+  ( AppConfig )
 
 data ConfigReader f = ConfigReader
   { read :: f AppConfig 
@@ -17,4 +20,4 @@ data ConfigReader f = ConfigReader
 
 mkConfigReader :: (MonadIO f) => Maybe String -> ConfigReader f
 mkConfigReader maybePath = ConfigReader $ liftIO $ input auto path
-  where path = T.pack $ fromMaybe "../tracker/resources/config.dhall" maybePath
+  where path = T.pack $ fromMaybe "./tracker/resources/config.dhall" maybePath
