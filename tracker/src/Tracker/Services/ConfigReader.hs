@@ -17,4 +17,4 @@ data ConfigReader f = ConfigReader
 
 mkConfigReader :: (MonadIO f) => Maybe String -> ConfigReader f
 mkConfigReader maybePath = ConfigReader $ liftIO $ input auto path
-  where path = T.pack $ fromMaybe "../tracker/resources/config.dhall" maybePath
+  where path = T.pack $ fromMaybe "./tracker/resources/config.dhall" maybePath

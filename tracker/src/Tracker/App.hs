@@ -35,8 +35,7 @@ wire args = runResourceT $ do
   ordersProducer   <- mkKafkaProducer ordersProducerConfig (TopicName ordersTopicName)
   poolsProducer    <- mkKafkaProducer poolsProducerConfig (TopicName poolsTopicName)
   trackerCache     <- mkCache redisSettings loggingMaker
-  let
-    explorer        = mkExplorer explorerConfig
-  trackerService  <- mkTrackerService trackerSettings retry loggingMaker trackerCache explorer
-  trackerProgramm <- mkTrackerProgram trackerProgrammConfig loggingMaker trackerCache trackerService ordersProducer poolsProducer
+  explorer         <- mkExplorer loggingMaker explorerConfig
+  trackerService   <- mkTrackerService trackerSettings retry loggingMaker trackerCache explorer
+  trackerProgramm  <- mkTrackerProgram trackerProgrammConfig loggingMaker trackerCache trackerService ordersProducer poolsProducer
   lift $ run trackerProgramm

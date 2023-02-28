@@ -1,11 +1,6 @@
-FROM ubuntu:21.04
+FROM ubuntu:22.04
 #Install all needed libraries
-RUN apt update && apt upgrade -y \
-  && apt install libsodium-dev -y \
-  && apt install libnuma-dev -y \
-  && apt install libffi-dev -y \
-  && apt install librdkafka-dev -y \
-  && apt install curl -y;
+RUN apt-get update -y && apt-get upgrade -y && apt-get install librocksdb-dev git liblzma-dev libnuma-dev curl automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf libncurses-dev clang llvm-13 llvm-13-dev -y
 
 #Install previsous versions of libffi libs
 RUN curl -LO http://archive.ubuntu.com/ubuntu/pool/main/libf/libffi/libffi6_3.2.1-8_amd64.deb \

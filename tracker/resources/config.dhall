@@ -4,7 +4,7 @@ let fileHandlers = \(path : Text) -> \(level : LogLevel) -> {_1 = path, _2 = lev
 let levelOverride = \(component : Text) -> \(level : LogLevel) -> {_1 = component, _2 = level}
 in
 { explorerConfig =
-    { explorerUri = "http://localhost:8084"
+    { explorerUri = "https://explorer.spectrum.fi"
     },
   ordersProducerConfig =
     { producerBrokers = ["127.0.0.1:9092"]

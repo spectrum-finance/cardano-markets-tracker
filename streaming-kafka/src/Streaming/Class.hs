@@ -15,7 +15,7 @@ class FromKafka k v where
 
 instance (ToJSON a, ToJSON b) => ToKafka a b where
   toKafka topic k v =
-      ProducerRecord topic UnassignedPartition encodedKey encodedValue
+      ProducerRecord topic UnassignedPartition encodedKey encodedValue (headersFromList [])
     where
       encodedValue = asKey v
       encodedKey   = asKey k
