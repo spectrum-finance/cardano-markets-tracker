@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TupleSections #-}
 
 module Tracker.App
   ( App(..)
@@ -24,9 +25,9 @@ import Data.Aeson
   ( encode )
 import Data.ByteString.Lazy.UTF8
   ( toString )
-import RIO.List 
+import RIO.List
   ( headMaybe )
-import Dhall 
+import Dhall
   ( Generic, Text )
 import Streamly.Prelude as S
   ( drain, IsStream, fromList, mapM, SerialT )
@@ -60,7 +61,7 @@ import Spectrum.LedgerSync.Config
 import Cardano.Network.Protocol.NodeToClient.Trace
   ( encodeTraceClient )
 
-import Streaming.Producer 
+import Streaming.Producer
   ( mkKafkaProducer, Producer(produce) )
 import Control.Monad.Class.MonadThrow
   ( MonadThrow, MonadMask, MonadCatch )
@@ -69,38 +70,40 @@ import System.Logging.Hlog
     ( translateMakeLogging, makeLogging, Logging(..), MakeLogging(forComponent) )
 import Control.Monad.Trans.Resource
     ( MonadUnliftIO, runResourceT, ResourceT )
-import Kafka.Producer 
+import Kafka.Producer
   ( TopicName(TopicName) )
 
-import Spectrum.LedgerSync 
+import Spectrum.LedgerSync
   ( mkLedgerSync, LedgerSync )
-import Spectrum.EventSource.Stream 
+import Spectrum.EventSource.Stream
   ( mkEventSource, EventSource(..) )
-import Spectrum.Config 
+import Spectrum.Config
   ( EventSourceConfig )
-import Spectrum.EventSource.Persistence.Config 
+import Spectrum.EventSource.Persistence.Config
   ( LedgerStoreConfig )
-import Spectrum.EventSource.Data.TxEvent 
+import Spectrum.EventSource.Data.TxEvent
   (TxEvent (..) )
-import Streaming.Config 
+import Streaming.Config
   ( KafkaProducerConfig(..) )
-import Spectrum.EventSource.Data.Tx 
+import Spectrum.EventSource.Data.Tx
   ( MinimalTx(..), MinimalUnconfirmedTx (..), MinimalConfirmedTx (..) )
-import CardanoTx.Models 
+import CardanoTx.Models
   (FullTxOut (..) )
-import ErgoDex.Amm.Orders 
+import ErgoDex.Amm.Orders
   (Swap(..), Deposit(..), Redeem(..), AnyOrder (AnyOrder), OrderAction (..) )
-import ErgoDex.State 
+import ErgoDex.State
   ( OnChain(..), Confirmed(..) )
-import ErgoDex.Class 
+import ErgoDex.Class
   ( FromLedger(..) )
-import Tracker.Syntax.Option 
+import Tracker.Syntax.Option
   ( unNone )
-import ErgoDex.Amm.Pool 
+import ErgoDex.Amm.Pool
   ( Pool )
-import ErgoDex.ScriptsValidators 
+import ErgoDex.ScriptsValidators
   ( ScriptsValidators, mkScriptsValidators, ScriptsConfig, parsePool )
 import Tracker.Models.AppConfig
+import Cardano.Api (SlotNo)
+import Tracker.Models.OnChainEvent (OnChainEvent (OnChainEvent))
 
 data App = App
   { runApp :: IO ()
@@ -189,8 +192,8 @@ processTxEvents
   -> ScriptsValidators
   -> s m (TxEvent ctx)
   -> Producer m String (TxEvent ctx)
-  -> Producer m String (OnChain AnyOrder)
-  -> Producer m String (OnChain Pool)
+  -> Producer m String (OnChainEvent AnyOrder)
+  -> Producer m String (OnChainEvent Pool)
   -> s m ()
 processTxEvents logging scriptsValidators txEventsStream txEventsProducer ordersProducer poolProducer =
   S.mapM (\txEvent -> do
@@ -199,24 +202,24 @@ processTxEvents logging scriptsValidators txEventsStream txEventsProducer orders
       parsePools  logging scriptsValidators txEvent >>= write2Kafka poolProducer
     ) txEventsStream
 
-write2Kafka :: (Monad m) => Producer m String (OnChain a) -> [OnChain a] -> m ()
-write2Kafka producer = produce producer . S.fromList . mkKafkaTuple 
+write2Kafka :: (Monad m) => Producer m String (OnChainEvent a) -> [OnChainEvent a] -> m ()
+write2Kafka producer = produce producer . S.fromList . mkKafkaTuple
 
-parsePools :: forall m ctx. (MonadIO m) => Logging m -> ScriptsValidators -> TxEvent ctx -> m [OnChain Pool]
+parsePools :: forall m ctx. (MonadIO m) => Logging m -> ScriptsValidators -> TxEvent ctx -> m [OnChainEvent Pool]
 parsePools logging scriptsValidators (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) =
- (parsePool logging scriptsValidators `traverse` txOutputs) <&> unNone <&> (\confirmedList -> (\(Confirmed _ a) -> a) <$> confirmedList)
+ (parsePool logging scriptsValidators `traverse` txOutputs) <&> unNone <&> (\confirmedList -> (\(Confirmed _ a) -> OnChainEvent a slotNo) <$> confirmedList)
 parsePools _  _  _= pure []
 
-mkKafkaTuple :: [OnChain a] -> [(String, OnChain a)]
-mkKafkaTuple ordersList = (\order@(OnChain FullTxOut{..} _) -> (show fullTxOutRef, order)) <$> ordersList
+mkKafkaTuple :: [OnChainEvent a] -> [(String, OnChainEvent a)]
+mkKafkaTuple ordersList = (\event@(OnChainEvent (OnChain FullTxOut{..} _) _) -> (show fullTxOutRef, event)) <$> ordersList
 
-parseOrders :: forall m ctx. (MonadIO m) => Logging m -> TxEvent ctx -> m [OnChain AnyOrder]
+parseOrders :: forall m ctx. (MonadIO m) => Logging m -> TxEvent ctx -> m [OnChainEvent AnyOrder]
 parseOrders logging (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) =
- (parseOrder logging `traverse` txOutputs) <&> unNone
+ (parseOrder logging slotNo `traverse` txOutputs) <&> unNone
 parseOrders _  _ = pure []
 
-parseOrder :: (MonadIO m) => Logging m -> FullTxOut -> m (Maybe (OnChain AnyOrder))
-parseOrder Logging{..} out =
+parseOrder :: (MonadIO m) => Logging m -> SlotNo -> FullTxOut -> m (Maybe (OnChainEvent AnyOrder))
+parseOrder Logging{..} slot out =
   let
     swap    = parseFromLedger @Swap out
     deposit = parseFromLedger @Deposit out
@@ -224,16 +227,16 @@ parseOrder Logging{..} out =
   in case (swap, deposit, redeem) of
     (Just (OnChain _ swap'), _, _)    -> do
       infoM ("Swap order: " ++ show swap)
-      pure $ Just . OnChain out $ AnyOrder (swapPoolId swap') (SwapAction swap')
+      pure . Just $ OnChainEvent (OnChain out $ AnyOrder (swapPoolId swap') (SwapAction swap')) slot
     (_, Just (OnChain _ deposit'), _) -> do
       infoM ("Deposit order: " ++ show deposit)
-      pure $  Just . OnChain out $ AnyOrder (depositPoolId deposit') (DepositAction deposit')
+      pure .  Just $ OnChainEvent (OnChain out $ AnyOrder (depositPoolId deposit') (DepositAction deposit')) slot
     (_, _, Just (OnChain _ redeem'))  -> do
       infoM ("Redeem order: " ++ show redeem)
-      pure $  Just . OnChain out $ AnyOrder (redeemPoolId redeem') (RedeemAction redeem')
+      pure .  Just $ OnChainEvent (OnChain out $ AnyOrder (redeemPoolId redeem') (RedeemAction redeem')) slot
     _                                 -> do
       infoM ("Order not found in: " ++ show out)
-      pure $ Nothing
+      pure Nothing
 
 mkKafkaKey :: TxEvent ctx -> String
 mkKafkaKey (PendingTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) = show txId

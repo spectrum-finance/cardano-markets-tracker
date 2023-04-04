@@ -81,6 +81,7 @@ library
                      Tracker.Services.ConfigReader
                      Tracker.App
                      Tracker.Models.Interop.Wrappers
+                     Tracker.Models.OnChainEvent
 
     build-depends:  hashable
                   , dex-core
