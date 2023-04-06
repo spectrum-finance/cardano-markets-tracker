@@ -6,7 +6,7 @@
 
 module Tracker.App
   ( App(..)
-  , runApp1
+  , runApp
   ) where
 
 import RIO
@@ -105,15 +105,11 @@ import Tracker.Models.AppConfig
 import Cardano.Api (SlotNo)
 import Tracker.Models.OnChainEvent (OnChainEvent (OnChainEvent))
 
-data App = App
-  { runApp :: IO ()
-  }
-
-newtype AppNew a = AppNew
-  { unApp :: ReaderT (Env Wire AppNew) IO a
+newtype App a = App
+  { unApp :: ReaderT (Env Wire App) IO a
   } deriving newtype
     ( Functor, Applicative, Monad
-    , MonadReader (Env Wire AppNew)
+    , MonadReader (Env Wire App)
     , MonadIO
     , MonadST
     , MonadThread, MonadFork
@@ -121,7 +117,7 @@ newtype AppNew a = AppNew
     , MonadBase IO, MonadBaseControl IO, MonadUnliftIO
     )
 
-type Wire = ResourceT AppNew
+type Wire = ResourceT App
 
 data Env f m = Env
   { ledgerSyncConfig       :: !LedgerSyncConfig
@@ -139,14 +135,14 @@ data Env f m = Env
   , mkLogging'             :: !(MakeLogging m m)
   } deriving stock (Generic)
 
-runContext :: Env Wire AppNew -> AppNew a -> IO a
+runContext :: Env Wire App -> App a -> IO a
 runContext env app = runReaderT (unApp app) env
 
-runApp1 :: [String] -> IO ()
-runApp1 args = do
+runApp :: [String] -> IO ()
+runApp args = do
   AppConfig{..} <- loadAppConfig (headMaybe args)
   nparams       <- parseNetworkParameters nodeConfigPath
-  mkLogging     <- makeLogging loggingConfig :: IO (MakeLogging IO AppNew)
+  mkLogging     <- makeLogging loggingConfig :: IO (MakeLogging IO App)
   let
     env =
       Env
@@ -161,8 +157,8 @@ runApp1 args = do
         poolsProducerConfig
         poolsTopicName
         scriptsConfig
-        (translateMakeLogging (lift . AppNew . lift) mkLogging)
-        (translateMakeLogging (AppNew . lift) mkLogging)
+        (translateMakeLogging (lift . App . lift) mkLogging)
+        (translateMakeLogging (App . lift) mkLogging)
   runContext env (runResourceT wireApp)
 
 wireApp :: Wire ()
@@ -170,8 +166,8 @@ wireApp = do
   env@Env{..} <- ask
   let tr = contramap (toString . encode . encodeTraceClient) stdoutTracer
 
-  lsync   <- lift $ mkLedgerSync (runContext env) tr :: ResourceT AppNew (LedgerSync AppNew)
-  lsource <- mkEventSource lsync :: ResourceT AppNew (EventSource S.SerialT AppNew 'LedgerCtx)
+  lsync   <- lift $ mkLedgerSync (runContext env) tr :: ResourceT App (LedgerSync App)
+  lsource <- mkEventSource lsync :: ResourceT App (EventSource S.SerialT App 'LedgerCtx)
 
   scriptsValidators      <- lift $ mkScriptsValidators scriptsConfig
   processTxEventsLogging <- forComponent mkLogging "processTxEvents"
@@ -245,28 +241,28 @@ mkKafkaKey (AppliedTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) = show txId -
 mkKafkaKey (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) = show txId
 mkKafkaKey (UnappliedTx txId) = show txId
 
-instance MonadRandom AppNew where
+instance MonadRandom App where
     getRandomBytes = liftIO . getEntropy
 
 newtype WrappedSTM a = WrappedSTM { unwrapSTM :: STM.STM a }
     deriving newtype (Functor, Applicative, Alternative, Monad, MonadPlus, MonadThrow)
 
-instance MonadSTM AppNew where
-  type STM     AppNew = WrappedSTM
-  type TVar    AppNew = STM.TVar
-  type TMVar   AppNew = STM.TMVar
-  type TQueue  AppNew = STM.TQueue
-  type TBQueue AppNew = STM.TBQueue
+instance MonadSTM App where
+  type STM     App = WrappedSTM
+  type TVar    App = STM.TVar
+  type TMVar   App = STM.TMVar
+  type TQueue  App = STM.TQueue
+  type TBQueue App = STM.TBQueue
 
-  atomically      = AppNew . lift . STM.atomically . unwrapSTM
+  atomically      = App . lift . STM.atomically . unwrapSTM
   retry           = WrappedSTM STM.retry
   orElse          = \a0 a1 -> WrappedSTM (STM.orElse (unwrapSTM a0) (unwrapSTM a1))
   check           = WrappedSTM . STM.check
 
   newTVar         = WrappedSTM . STM.newTVar
-  newTVarIO       = AppNew . lift . STM.newTVarIO
+  newTVarIO       = App . lift . STM.newTVarIO
   readTVar        = WrappedSTM . STM.readTVar
-  readTVarIO      = AppNew . lift . STM.readTVarIO
+  readTVarIO      = App . lift . STM.readTVarIO
   writeTVar       = \a0 -> WrappedSTM . STM.writeTVar a0
   modifyTVar      = \a0 -> WrappedSTM . STM.modifyTVar a0
   modifyTVar'     = \a0 -> WrappedSTM . STM.modifyTVar' a0
@@ -274,9 +270,9 @@ instance MonadSTM AppNew where
   swapTVar        = \a0 -> WrappedSTM . STM.swapTVar a0
 
   newTMVar        = WrappedSTM . STM.newTMVar
-  newTMVarIO      = AppNew . lift . STM.newTMVarIO
+  newTMVarIO      = App . lift . STM.newTMVarIO
   newEmptyTMVar   = WrappedSTM STM.newEmptyTMVar
-  newEmptyTMVarIO = AppNew (lift STM.newEmptyTMVarIO)
+  newEmptyTMVarIO = App (lift STM.newEmptyTMVarIO)
   takeTMVar       = WrappedSTM . STM.takeTMVar
   tryTakeTMVar    = WrappedSTM . STM.tryTakeTMVar
   putTMVar        = \a0 -> WrappedSTM . STM.putTMVar a0
@@ -287,7 +283,7 @@ instance MonadSTM AppNew where
   isEmptyTMVar    = WrappedSTM . STM.isEmptyTMVar
 
   newTQueue       = WrappedSTM STM.newTQueue
-  newTQueueIO     = AppNew (lift STM.newTQueueIO)
+  newTQueueIO     = App (lift STM.newTQueueIO)
   readTQueue      = WrappedSTM . STM.readTQueue
   tryReadTQueue   = WrappedSTM . STM.tryReadTQueue
   peekTQueue      = WrappedSTM . STM.peekTQueue
@@ -297,7 +293,7 @@ instance MonadSTM AppNew where
   isEmptyTQueue   = WrappedSTM . STM.isEmptyTQueue
 
   newTBQueue      = WrappedSTM . STM.newTBQueue
-  newTBQueueIO    = AppNew . lift . STM.newTBQueueIO
+  newTBQueueIO    = App . lift . STM.newTBQueueIO
   readTBQueue     = WrappedSTM . STM.readTBQueue
   tryReadTBQueue  = WrappedSTM . STM.tryReadTBQueue
   peekTBQueue     = WrappedSTM . STM.peekTBQueue
@@ -310,17 +306,17 @@ instance MonadSTM AppNew where
 newtype WrappedAsync a = WrappedAsync { unwrapAsync :: Async.Async a }
     deriving newtype (Functor)
 
-instance MonadAsync AppNew where
-  type Async AppNew  = WrappedAsync
-  async           = \(AppNew (ReaderT m)) -> AppNew (ReaderT $ \r -> WrappedAsync <$> async (m r))
+instance MonadAsync App where
+  type Async App  = WrappedAsync
+  async           = \(App (ReaderT m)) -> App (ReaderT $ \r -> WrappedAsync <$> async (m r))
   asyncThreadId   = Async.asyncThreadId . unwrapAsync
   pollSTM         = WrappedSTM . Async.pollSTM . unwrapAsync
   waitCatchSTM    = WrappedSTM . Async.waitCatchSTM . unwrapAsync
-  cancel          = AppNew . lift . Async.cancel . unwrapAsync
-  cancelWith      = \a0 -> AppNew . lift . Async.cancelWith (unwrapAsync a0)
-  asyncWithUnmask = \restore -> AppNew $ ReaderT $ \r ->
+  cancel          = App . lift . Async.cancel . unwrapAsync
+  cancelWith      = \a0 -> App . lift . Async.cancelWith (unwrapAsync a0)
+  asyncWithUnmask = \restore -> App $ ReaderT $ \r ->
       fmap WrappedAsync $ Async.asyncWithUnmask $ \unmask ->
         runReaderT (unApp (restore (liftF unmask))) r
     where
-      liftF :: (IO a -> IO a) -> AppNew a -> AppNew a
-      liftF g (AppNew (ReaderT f)) = AppNew (ReaderT (g . f))
+      liftF :: (IO a -> IO a) -> App a -> App a
+      liftF g (App (ReaderT f)) = App (ReaderT (g . f))

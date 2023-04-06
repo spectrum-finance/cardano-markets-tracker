@@ -7,4 +7,4 @@ import System.Environment
 main :: IO ()
 main = do
   args <- getArgs
-  runApp1 args
+  runApp args
