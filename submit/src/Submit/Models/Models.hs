@@ -9,6 +9,7 @@ module Submit.Models.Models
     , DecryptedSignKey(..)
     ) where
 
+
 import           RIO
 import qualified Data.Text as T
 
