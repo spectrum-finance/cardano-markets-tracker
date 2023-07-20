@@ -1,6 +1,5 @@
 module Submit.Services.TxMaker 
-    ( mkPkh
-    , mkFullTxIn
+    ( mkFullTxIn
     , mkTxOutCandidate
     , mkTxCandidate
     ) where
@@ -9,38 +8,37 @@ import Submit.Models.Models
 
 import CardanoTx.Models
 
-import           Ledger (PaymentPubKeyHash(..), pubKeyHashAddress)
+import           Ledger (PaymentPubKeyHash(..), pubKeyHashAddress, PubKeyHash(..))
 import qualified Ledger.Interval as Interval
 
-mkPkh :: Address -> PubKeyHash
+import qualified RIO.List as List
+import qualified RIO.Set  as Set
 
 mkFullTxIn :: ApiInput -> FullTxIn
-mkFullTxIn ApiInput{..} =
-    let fullTxOut = 
-        FullTxOut
-            { fullTxOutRef       = boxRef
-            , fullTxOutAddress   = address
-            , fullTxOutValue     = value
-            , fullTxOutDatum     = EmptyDatum
-            , fullTxOutScriptRef = Nothing
-            }
-    return $ mkPkhTxIn fullTxOut
+mkFullTxIn ApiInput{..} = do
+    mkPkhTxIn $ FullTxOut
+        { fullTxOutRef       = boxRef
+        , fullTxOutAddress   = pubKeyHashAddress (PaymentPubKeyHash inputPkh) Nothing
+        , fullTxOutValue     = List.foldl (<>) mempty (List.map outAssetToValue inputValue)
+        , fullTxOutDatum     = EmptyDatum
+        , fullTxOutScriptRef = Nothing
+        }
 
 mkTxOutCandidate :: ApiOutput -> TxOutCandidate
-mkTxOutCandidate ApiOutput{..} =
+mkTxOutCandidate ApiOutput{..} = do
     TxOutCandidate 
-        { txOutCandidateAddress   = address
-        , txOutCandidateValue     = value
+        { txOutCandidateAddress   = pubKeyHashAddress (PaymentPubKeyHash outputPkh) Nothing
+        , txOutCandidateValue     = List.foldl (<>) mempty (List.map outAssetToValue outputValue)
         , txOutCandidateDatum     = EmptyDatum
         , txOutCandidateRefScript = Nothing
         } 
 
 mkTxCandidate :: PubKeyHash -> [FullTxIn] -> [TxOutCandidate] -> TxCandidate
-mkTxCandidate pkh inputs outputs =
+mkTxCandidate pkh inputs outputs = do
     let rewardAddr = pubKeyHashAddress (PaymentPubKeyHash pkh) Nothing
     TxCandidate
-        { txCandidateInputs       = inputs
-        , txCandidateRefIns       = List.fmap (\FullTxIn{..} -> fullTxInTxOut) inputs
+        { txCandidateInputs       = Set.fromList inputs
+        , txCandidateRefIns       = List.map (\FullTxIn{..} -> fullTxInTxOut) inputs
         , txCandidateOutputs      = outputs
         , txCandidateValueMint    = mempty
         , txCandidateMintInputs   = mempty

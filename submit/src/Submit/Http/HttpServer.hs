@@ -1,34 +1,34 @@
 {-# LANGUAGE TypeOperators #-}
 
-module Resolver.Endpoints.HttpServer
+module Submit.Http.HttpServer
   ( HttpServer(..)
-  , mkHttpServer
   ) where
 
 import Submit.Services.TxMaker
 import Submit.Models.Models
+import Submit.Services.Encryption 
 
-import Resolver.Models.AppSettings as AppSettings
-import Resolver.Repositories.PoolRepository
-import Resolver.Services.PoolResolver
-import RIO
+import           RIO
+import qualified RIO.List as List
+import System.Logging.Hlog (MakeLogging(..))
+
+import Explorer.Service
+import WalletAPI.UtxoStoreConfig
+
 import Data.Int
 import Control.Monad.Trans.Except
 import Servant
 import Network.Wai.Handler.Warp as Warp
 import GHC.Natural
-import ErgoDex.Amm.Pool
-import Cardano.Models
-import Explorer.Types
-import Resolver.Models.Types
+
 
 data HttpServer f = HttpServer
   { runHttpServer :: f ()
   }
-
+ -- ApiTransaction, ApiError
 type Api =
-  "finalize" :> ReqBody '[JSON] ([ApiInput], [ApiOutput], EncryptedSignKey) :> Post '[JSON] ApiTransaction :<|>
-  "submit"   :> ReqBody '[JSON] ApiTransaction                              :> Post '[JSON] (Maybe ApiError)
+  "finalize" :> ReqBody '[JSON] ([ApiInput], [ApiOutput], EncryptedSignKey) :> Post '[JSON] () :<|>
+  "submit"   :> ReqBody '[JSON] ()                              :> Post '[JSON] (Maybe ())
 
 finalize 
     :: CardanoNetwork f C.BabbageEra
@@ -41,15 +41,15 @@ finalize
     -> [ApiInput] 
     -> [ApiOutput] 
     -> EncryptedSignKey 
-    -> f ApiTransaction
+    -> f ()
 finalize network networkId txAssemblyConfig mkLogging utxoStoreConfig explorer Encryption{..} inputs outputs encryptedSignKey = do
     signKey         <- decrypt encryptedSignKey
     walletOutputs   <- mkUtxoStore mkLogging
     let 
-        transactions = mkTransactions network networkId Map.empty walletOutputs (mkVault signKey) txAssemblyConfig
-        inputs = List.fmap inputs mkFullTxIn
-        outs = List.fmap outputs mkTxOutCandidate
-        pkh = List.fmap inputs mkPkh
+        transactions = mkTransactions network networkId mempty walletOutputs (mkVault signKey) txAssemblyConfig
+        inputs = List.map mkFullTxIn inputs
+        outs = List.map mkTxOutCandidate outputs 
+        pkh = List.map mkPkh inputs
         tx = mkTxCandidate pkh inputs outs
     return tx
 
