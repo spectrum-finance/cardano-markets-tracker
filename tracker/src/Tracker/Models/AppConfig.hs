@@ -12,28 +12,29 @@ import System.Logging.Hlog
 import Streaming.Config 
   ( KafkaProducerConfig )
 
-import Spectrum.LedgerSync.Config 
-  ( LedgerSyncConfig )
 import Spectrum.Config 
   ( EventSourceConfig )
 import Spectrum.EventSource.Persistence.Config
   ( LedgerStoreConfig )
 import ErgoDex.ScriptsValidators 
   ( ScriptsConfig )
+import Spectrum.LedgerSync.Config
 
 data AppConfig = AppConfig
-  { ordersProducerConfig   :: !KafkaProducerConfig
-  , ledgerSyncConfig       :: !LedgerSyncConfig
-  , poolsProducerConfig    :: !KafkaProducerConfig
-  , txEventsProducerConfig :: !KafkaProducerConfig
-  , nodeConfigPath         :: !FilePath
-  , ordersTopicName        :: !Text
-  , poolsTopicName         :: !Text
-  , txEventsTopicName      :: !Text
-  , loggingConfig          :: !LoggingConfig
-  , eventSourceConfig      :: !EventSourceConfig
-  , lederHistoryConfig     :: !LedgerStoreConfig
-  , scriptsConfig          :: !ScriptsConfig
+  { nodeSocketConfig             :: !NodeSocketConfig
+  , ordersProducerConfig         :: !KafkaProducerConfig
+  , poolsProducerConfig          :: !KafkaProducerConfig
+  , txEventsProducerConfig       :: !KafkaProducerConfig
+  , mempoolOrdersProducerConfig  :: !KafkaProducerConfig
+  , nodeConfigPath               :: !FilePath
+  , mempoolOrdersTopicName       :: !Text 
+  , ordersTopicName              :: !Text
+  , poolsTopicName               :: !Text
+  , txEventsTopicName            :: !Text
+  , loggingConfig                :: !LoggingConfig
+  , eventSourceConfig            :: !EventSourceConfig
+  , lederStoreConfig             :: !LedgerStoreConfig
+  , scriptsConfig                :: !ScriptsConfig
   } deriving (Generic)
 
 instance FromDhall AppConfig

@@ -120,6 +120,7 @@ library
                   , async
                   , contra-tracer
                   , serialise
+                  , unix
 
 executable tracker-app
     main-is: Main.hs

@@ -10,7 +10,7 @@ module Tracker.App
   ) where
 
 import RIO
-  ( ReaderT (..), MonadReader (ask), MonadIO (liftIO), Alternative (..), MonadPlus (..), (<&>) )
+  ( ReaderT (..), MonadReader (ask), MonadIO (liftIO), Alternative (..), MonadPlus (..), (<&>), void )
 
 import qualified Control.Concurrent.STM.TBQueue as STM
 import qualified Control.Concurrent.STM.TMVar   as STM
@@ -30,7 +30,7 @@ import RIO.List
 import Dhall
   ( Generic, Text )
 import Streamly.Prelude as S
-  ( drain, IsStream, fromList, mapM, SerialT )
+  ( drain, IsStream, fromList, mapM, SerialT, parallel )
 import Crypto.Random.Types
   ( MonadRandom(..) )
 import Control.Tracer
@@ -54,10 +54,18 @@ import Crypto.Random.Entropy
 import qualified Control.Monad.Catch as MC
 
 import Spectrum.EventSource.Data.TxContext
-    ( TxCtx(LedgerCtx) )
+    ( TxCtx(LedgerCtx, MempoolCtx) )
+
+import System.Posix.Signals
+  ( Handler (..)
+  , installHandler
+  , keyboardSignal
+  , raiseSignal
+  , softwareTermination
+  )
 
 import Spectrum.LedgerSync.Config
-  ( NetworkParameters, LedgerSyncConfig, parseNetworkParameters )
+  ( NetworkParameters, parseNetworkParameters, NodeSocketConfig )
 import Cardano.Network.Protocol.NodeToClient.Trace
   ( encodeTraceClient )
 
@@ -76,11 +84,9 @@ import Kafka.Producer
 import Spectrum.LedgerSync
   ( mkLedgerSync, LedgerSync )
 import Spectrum.EventSource.Stream
-  ( mkEventSource, EventSource(..) )
+  ( mkLedgerEventSource, EventSource(..), mkMempoolTxEventSource )
 import Spectrum.Config
   ( EventSourceConfig )
-import Spectrum.EventSource.Persistence.Config
-  ( LedgerStoreConfig )
 import Spectrum.EventSource.Data.TxEvent
   (TxEvent (..) )
 import Streaming.Config
@@ -104,6 +110,7 @@ import ErgoDex.ScriptsValidators
 import Tracker.Models.AppConfig
 import Cardano.Api (SlotNo)
 import Tracker.Models.OnChainEvent (OnChainEvent (OnChainEvent))
+import Spectrum.EventSource.Persistence.Config (LedgerStoreConfig)
 
 newtype App a = App
   { unApp :: ReaderT (Env Wire App) IO a
@@ -120,19 +127,21 @@ newtype App a = App
 type Wire = ResourceT App
 
 data Env f m = Env
-  { ledgerSyncConfig       :: !LedgerSyncConfig
-  , eventSourceConfig      :: !EventSourceConfig
-  , networkParams          :: !NetworkParameters
-  , lederHistoryConfig     :: !LedgerStoreConfig
-  , txEventsProducerConfig :: !KafkaProducerConfig
-  , txEventsTopicName      :: !Text
-  , ordersProducerConfig   :: !KafkaProducerConfig
-  , ordersTopicName        :: !Text
-  , poolsProducerConfig    :: !KafkaProducerConfig
-  , poolsTopicName         :: !Text
-  , scriptsConfig          :: !ScriptsConfig
-  , mkLogging              :: !(MakeLogging f m)
-  , mkLogging'             :: !(MakeLogging m m)
+  { nodeSocketConfig             :: !NodeSocketConfig
+  , ledgerStoreConfig            :: !LedgerStoreConfig
+  , eventSourceConfig            :: !EventSourceConfig
+  , networkParams                :: !NetworkParameters
+  , txEventsProducerConfig       :: !KafkaProducerConfig
+  , txEventsTopicName            :: !Text
+  , ordersProducerConfig         :: !KafkaProducerConfig
+  , ordersTopicName              :: !Text
+  , mempoolOrdersProducerConfig  :: !KafkaProducerConfig
+  , mempoolOrdersTopicName       :: !Text
+  , poolsProducerConfig          :: !KafkaProducerConfig
+  , poolsTopicName               :: !Text
+  , scriptsConfig                :: !ScriptsConfig
+  , mkLogging                    :: !(MakeLogging f m)
+  , mkLogging'                   :: !(MakeLogging m m)
   } deriving stock (Generic)
 
 runContext :: Env Wire App -> App a -> IO a
@@ -146,14 +155,16 @@ runApp args = do
   let
     env =
       Env
-        ledgerSyncConfig
+        nodeSocketConfig
+        lederStoreConfig
         eventSourceConfig
         nparams
-        lederHistoryConfig
         txEventsProducerConfig
         txEventsTopicName
         ordersProducerConfig
         ordersTopicName
+        mempoolOrdersProducerConfig
+        mempoolOrdersTopicName
         poolsProducerConfig
         poolsTopicName
         scriptsConfig
@@ -166,16 +177,20 @@ wireApp = do
   env@Env{..} <- ask
   let tr = contramap (toString . encode . encodeTraceClient) stdoutTracer
 
-  lsync   <- lift $ mkLedgerSync (runContext env) tr :: ResourceT App (LedgerSync App)
-  lsource <- mkEventSource lsync :: ResourceT App (EventSource S.SerialT App 'LedgerCtx)
+  lsync   <- lift $ mkLedgerSync (runContext env) tr mkLogging' nodeSocketConfig networkParams -- :: ResourceT App (LedgerSync App)
+  lsource <- mkLedgerEventSource lsync lift :: ResourceT App (EventSource S.SerialT App 'LedgerCtx)
+  msource <- mkMempoolTxEventSource lsync   :: ResourceT App (EventSource S.SerialT App 'MempoolCtx)
 
   scriptsValidators      <- lift $ mkScriptsValidators scriptsConfig
   processTxEventsLogging <- forComponent mkLogging "processTxEvents"
 
-  txEventsProducer <- mkKafkaProducer txEventsProducerConfig (TopicName txEventsTopicName)
-  ordersProducer   <- mkKafkaProducer ordersProducerConfig (TopicName ordersTopicName)
-  poolsProducer    <- mkKafkaProducer poolsProducerConfig (TopicName poolsTopicName)
-  lift . S.drain $ processTxEvents processTxEventsLogging scriptsValidators (upstream lsource) txEventsProducer ordersProducer poolsProducer
+  txEventsProducer      <- mkKafkaProducer txEventsProducerConfig (TopicName txEventsTopicName)
+  ordersProducer        <- mkKafkaProducer ordersProducerConfig (TopicName ordersTopicName)
+  mempoolOrdersProducer <- mkKafkaProducer mempoolOrdersProducerConfig (TopicName mempoolOrdersTopicName)
+  poolsProducer         <- mkKafkaProducer poolsProducerConfig (TopicName poolsTopicName)
+  lift . S.drain $ 
+    S.parallel (processTxEvents processTxEventsLogging scriptsValidators (upstream lsource) txEventsProducer ordersProducer poolsProducer) $
+    processMempoolTxEvents processTxEventsLogging (upstream msource) mempoolOrdersProducer
 
 processTxEvents
   ::
@@ -198,6 +213,22 @@ processTxEvents logging scriptsValidators txEventsStream txEventsProducer orders
       parsePools  logging scriptsValidators txEvent >>= write2Kafka poolProducer
     ) txEventsStream
 
+processMempoolTxEvents
+  ::
+    ( IsStream s
+    , MonadIO m
+    , MonadBaseControl IO m
+    , MC.MonadThrow m
+    )
+  => Logging m
+  -> s m (TxEvent ctx)
+  -> Producer m String (OnChainEvent AnyOrder)
+  -> s m ()
+processMempoolTxEvents logging txEventsStream mempoolOrdersProducer =
+  S.mapM (\txEvent -> do
+      parseOrders logging txEvent >>= write2Kafka mempoolOrdersProducer
+    ) txEventsStream
+
 write2Kafka :: (Monad m) => Producer m String (OnChainEvent a) -> [OnChainEvent a] -> m ()
 write2Kafka producer = produce producer . S.fromList . mkKafkaTuple
 
@@ -212,6 +243,8 @@ mkKafkaTuple ordersList = (\event@(OnChainEvent (OnChain FullTxOut{..} _) _) -> 
 parseOrders :: forall m ctx. (MonadIO m) => Logging m -> TxEvent ctx -> m [OnChainEvent AnyOrder]
 parseOrders logging (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) =
  (parseOrder logging slotNo `traverse` txOutputs) <&> unNone
+parseOrders logging (PendingTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) =
+  (parseOrder logging slotNo `traverse` txOutputs) <&> unNone
 parseOrders _  _ = pure []
 
 parseOrder :: (MonadIO m) => Logging m -> SlotNo -> FullTxOut -> m (Maybe (OnChainEvent AnyOrder))
@@ -231,13 +264,11 @@ parseOrder Logging{..} slot out =
       infoM ("Redeem order: " ++ show redeem)
       pure .  Just $ OnChainEvent (OnChain out $ AnyOrder (redeemPoolId redeem') (RedeemAction redeem')) slot
     _                                 -> do
-      infoM ("Order not found in: " ++ show out)
+      infoM ("Order not found in: " ++ show (fullTxOutRef out))
       pure Nothing
 
 mkKafkaKey :: TxEvent ctx -> String
 mkKafkaKey (PendingTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) = show txId
-mkKafkaKey (PendingTx (MinimalLedgerTx MinimalConfirmedTx{..})) = show txId    -- todo: doesn't support in current version
-mkKafkaKey (AppliedTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) = show txId -- todo: doesn't support in current version
 mkKafkaKey (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) = show txId
 mkKafkaKey (UnappliedTx txId) = show txId
 
