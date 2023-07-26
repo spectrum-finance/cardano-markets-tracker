@@ -26,8 +26,10 @@ data AppConfig = AppConfig
   , poolsProducerConfig          :: !KafkaProducerConfig
   , txEventsProducerConfig       :: !KafkaProducerConfig
   , mempoolOrdersProducerConfig  :: !KafkaProducerConfig
+  , mempoolPoolsProducerConfig   :: !KafkaProducerConfig
   , nodeConfigPath               :: !FilePath
   , mempoolOrdersTopicName       :: !Text 
+  , mempoolPoolsTopicName        :: !Text
   , ordersTopicName              :: !Text
   , poolsTopicName               :: !Text
   , txEventsTopicName            :: !Text
