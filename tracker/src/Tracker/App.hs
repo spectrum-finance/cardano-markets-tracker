@@ -137,6 +137,8 @@ data Env f m = Env
   , ordersTopicName              :: !Text
   , mempoolOrdersProducerConfig  :: !KafkaProducerConfig
   , mempoolOrdersTopicName       :: !Text
+  , mempoolPoolsProducerConfig   :: !KafkaProducerConfig
+  , mempoolPoolsTopicName        :: !Text
   , poolsProducerConfig          :: !KafkaProducerConfig
   , poolsTopicName               :: !Text
   , scriptsConfig                :: !ScriptsConfig
@@ -165,6 +167,8 @@ runApp args = do
         ordersTopicName
         mempoolOrdersProducerConfig
         mempoolOrdersTopicName
+        mempoolPoolsProducerConfig
+        mempoolPoolsTopicName
         poolsProducerConfig
         poolsTopicName
         scriptsConfig
@@ -187,10 +191,11 @@ wireApp = do
   txEventsProducer      <- mkKafkaProducer txEventsProducerConfig (TopicName txEventsTopicName)
   ordersProducer        <- mkKafkaProducer ordersProducerConfig (TopicName ordersTopicName)
   mempoolOrdersProducer <- mkKafkaProducer mempoolOrdersProducerConfig (TopicName mempoolOrdersTopicName)
+  mempoolPoolsProducer  <- mkKafkaProducer mempoolPoolsProducerConfig (TopicName mempoolPoolsTopicName)
   poolsProducer         <- mkKafkaProducer poolsProducerConfig (TopicName poolsTopicName)
   lift . S.drain $ 
     S.parallel (processTxEvents processTxEventsLogging scriptsValidators (upstream lsource) txEventsProducer ordersProducer poolsProducer) $
-    processMempoolTxEvents processTxEventsLogging (upstream msource) mempoolOrdersProducer
+    processMempoolTxEvents processTxEventsLogging scriptsValidators (upstream msource) mempoolOrdersProducer mempoolPoolsProducer
 
 processTxEvents
   ::
@@ -221,12 +226,15 @@ processMempoolTxEvents
     , MC.MonadThrow m
     )
   => Logging m
+  -> ScriptsValidators
   -> s m (TxEvent ctx)
   -> Producer m String (OnChainEvent AnyOrder)
+  -> Producer m String (OnChainEvent Pool)
   -> s m ()
-processMempoolTxEvents logging txEventsStream mempoolOrdersProducer =
+processMempoolTxEvents logging scriptsValidators txEventsStream mempoolOrdersProducer mempoolPoolProducer =
   S.mapM (\txEvent -> do
       parseOrders logging txEvent >>= write2Kafka mempoolOrdersProducer
+      parsePools  logging scriptsValidators txEvent >>= write2Kafka mempoolPoolProducer
     ) txEventsStream
 
 write2Kafka :: (Monad m) => Producer m String (OnChainEvent a) -> [OnChainEvent a] -> m ()
@@ -234,6 +242,8 @@ write2Kafka producer = produce producer . S.fromList . mkKafkaTuple
 
 parsePools :: forall m ctx. (MonadIO m) => Logging m -> ScriptsValidators -> TxEvent ctx -> m [OnChainEvent Pool]
 parsePools logging scriptsValidators (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) =
+ (parsePool logging scriptsValidators `traverse` txOutputs) <&> unNone <&> (\confirmedList -> (\(Confirmed _ a) -> OnChainEvent a slotNo) <$> confirmedList)
+parsePools logging scriptsValidators (PendingTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) =
  (parsePool logging scriptsValidators `traverse` txOutputs) <&> unNone <&> (\confirmedList -> (\(Confirmed _ a) -> OnChainEvent a slotNo) <$> confirmedList)
 parsePools _  _  _= pure []
 
