@@ -80,6 +80,7 @@ library
                      Submit.Services.TxMaker
                      Submit.Services.Encryption
                      Submit.Http.HttpServer
+                     Submit.Http.Models
 
     build-depends:  rio
                   , plutus-ledger
@@ -91,3 +92,13 @@ library
                   , transformers == 0.5.6.2
                   , quickblue
                   , hlog == 0.1.0.0
+                  , rocksdb-haskell
+                  , wallet-api
+                  , cardano-api
+                  , network-api
+                  , submit-api
+                  , io-classes == 0.2.0.0
+                  , algebra-core == 0.1.0.0
+                  , exceptions == 0.10.4
+                  , aeson == 2.0.2.0
+                  
