@@ -2,6 +2,7 @@ index-state: 2022-04-06T00:00:00Z
 
 packages:
   streaming-kafka
+  submit-http-api
   tracker
 
 package cardano-crypto-praos
@@ -304,7 +305,7 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/ergolabs/cardano-dex-contracts
-  tag: 7850574a9b7f3e33cd7fc16f5fcdbbf0c8de68df
+  tag: c25c8ab7daf52871d29efd00d3dac236cc9d6a36
   subdir:
     cardano-dex-contracts-offchain
 
@@ -315,8 +316,13 @@ source-repository-package
 
 source-repository-package
   type: git
+  location: https://github.com/daleiz/rocksdb-haskell
+  tag: 109af08f95b40f458d4933e3725ecb3e59337c39
+
+source-repository-package
+  type: git
   location: https://github.com/ergolabs/cardano-dex-sdk-haskell
-  tag: c7d67ab6ae50ef2ec9b6e0542a9831e4b536ab5b
+  tag: 71557902ce6364f9929e62e5e18f4b29a48a33ce
   subdir:
     cardano-tx
     ergo-hs-common
