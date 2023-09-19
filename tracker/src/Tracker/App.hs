@@ -111,6 +111,7 @@ import Tracker.Models.AppConfig
 import Cardano.Api (SlotNo)
 import Tracker.Models.OnChainEvent (OnChainEvent (OnChainEvent))
 import Spectrum.EventSource.Persistence.Config (LedgerStoreConfig)
+import Tracker.Models.LBSPDatum (LBSPDatum)
 
 newtype App a = App
   { unApp :: ReaderT (Env Wire App) IO a
@@ -139,6 +140,8 @@ data Env f m = Env
   , mempoolOrdersTopicName       :: !Text
   , mempoolPoolsProducerConfig   :: !KafkaProducerConfig
   , mempoolPoolsTopicName        :: !Text
+  , lbspProducerConfig           :: !KafkaProducerConfig
+  , lbspTopicName                :: !Text
   , poolsProducerConfig          :: !KafkaProducerConfig
   , poolsTopicName               :: !Text
   , scriptsConfig                :: !ScriptsConfig
@@ -169,6 +172,8 @@ runApp args = do
         mempoolOrdersTopicName
         mempoolPoolsProducerConfig
         mempoolPoolsTopicName
+        lbspProducerConfig
+        lbspTopicName
         poolsProducerConfig
         poolsTopicName
         scriptsConfig
@@ -192,9 +197,10 @@ wireApp = do
   ordersProducer        <- mkKafkaProducer ordersProducerConfig (TopicName ordersTopicName)
   mempoolOrdersProducer <- mkKafkaProducer mempoolOrdersProducerConfig (TopicName mempoolOrdersTopicName)
   mempoolPoolsProducer  <- mkKafkaProducer mempoolPoolsProducerConfig (TopicName mempoolPoolsTopicName)
+  lbspProducer          <- mkKafkaProducer lbspProducerConfig (TopicName lbspTopicName)
   poolsProducer         <- mkKafkaProducer poolsProducerConfig (TopicName poolsTopicName)
   lift . S.drain $ 
-    S.parallel (processTxEvents processTxEventsLogging scriptsValidators (upstream lsource) txEventsProducer ordersProducer poolsProducer) $
+    S.parallel (processTxEvents processTxEventsLogging scriptsValidators (upstream lsource) txEventsProducer ordersProducer poolsProducer lbspProducer) $
     processMempoolTxEvents processTxEventsLogging scriptsValidators (upstream msource) mempoolOrdersProducer mempoolPoolsProducer
 
 processTxEvents
@@ -210,12 +216,14 @@ processTxEvents
   -> Producer m String (TxEvent ctx)
   -> Producer m String (OnChainEvent AnyOrder)
   -> Producer m String (OnChainEvent Pool)
+  -> Producer m String (OnChainEvent LBSPDatum)
   -> s m ()
-processTxEvents logging scriptsValidators txEventsStream txEventsProducer ordersProducer poolProducer =
+processTxEvents logging scriptsValidators txEventsStream txEventsProducer ordersProducer poolProducer lbspProducer =
   S.mapM (\txEvent -> do
       produce txEventsProducer (S.fromList [(mkKafkaKey txEvent, txEvent)])
       parseOrders logging txEvent >>= write2Kafka ordersProducer
       parsePools  logging scriptsValidators txEvent >>= write2Kafka poolProducer
+      parseLbsp   logging txEvent >>= write2Kafka lbspProducer
     ) txEventsStream
 
 processMempoolTxEvents
@@ -256,6 +264,23 @@ parseOrders logging (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) =
 parseOrders logging (PendingTx (MinimalMempoolTx MinimalUnconfirmedTx{..})) =
   (parseOrder logging slotNo `traverse` txOutputs) <&> unNone
 parseOrders _  _ = pure []
+
+parseLbsp :: forall m ctx. (MonadIO m) => Logging m -> TxEvent ctx -> m [OnChainEvent LBSPDatum]
+parseLbsp logging (AppliedTx (MinimalLedgerTx MinimalConfirmedTx{..})) =
+  (parseLbspDatum logging slotNo `traverse` txOutputs) <&> unNone
+parseLbsp _  _ = pure []
+
+parseLbspDatum :: (MonadIO m) => Logging m -> SlotNo -> FullTxOut -> m (Maybe (OnChainEvent LBSPDatum))
+parseLbspDatum Logging{..} slot out =
+  let
+    lbspDatum = parseFromLedger @LBSPDatum out
+  in case lbspDatum of
+    (Just (OnChain _ lbsp'))    -> do
+      infoM ("Lbsp datum: " ++ show lbsp')
+      pure . Just $ OnChainEvent (OnChain out lbsp') slot
+    _                                 -> do
+      infoM ("Lbsp datum not found in: " ++ show (fullTxOutRef out))
+      pure Nothing
 
 parseOrder :: (MonadIO m) => Logging m -> SlotNo -> FullTxOut -> m (Maybe (OnChainEvent AnyOrder))
 parseOrder Logging{..} slot out =

@@ -82,6 +82,7 @@ library
                      Tracker.App
                      Tracker.Models.Interop.Wrappers
                      Tracker.Models.OnChainEvent
+                     Tracker.Models.LBSPDatum
 
     build-depends:  hashable
                   , dex-core

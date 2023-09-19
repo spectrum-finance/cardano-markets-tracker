@@ -27,12 +27,14 @@ data AppConfig = AppConfig
   , txEventsProducerConfig       :: !KafkaProducerConfig
   , mempoolOrdersProducerConfig  :: !KafkaProducerConfig
   , mempoolPoolsProducerConfig   :: !KafkaProducerConfig
+  , lbspProducerConfig           :: !KafkaProducerConfig
   , nodeConfigPath               :: !FilePath
   , mempoolOrdersTopicName       :: !Text 
   , mempoolPoolsTopicName        :: !Text
   , ordersTopicName              :: !Text
   , poolsTopicName               :: !Text
   , txEventsTopicName            :: !Text
+  , lbspTopicName                :: !Text
   , loggingConfig                :: !LoggingConfig
   , eventSourceConfig            :: !EventSourceConfig
   , lederStoreConfig             :: !LedgerStoreConfig
