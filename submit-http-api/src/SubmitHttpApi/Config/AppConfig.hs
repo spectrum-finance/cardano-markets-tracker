@@ -44,7 +44,6 @@ data AppConfig = AppConfig
   , secrets             :: !Secrets
   , loggingConfig       :: !LoggingConfig
   , explorerConfig      :: !ExplorerConfig
-  , boxFeeApproximately :: !Integer 
   , deafultChangeAddr   :: !DefaultChangeAddress
   , txAssemblyConfig    :: !TxAssemblyConfig
   , spfPolicyId         :: !Text

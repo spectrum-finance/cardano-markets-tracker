@@ -9,7 +9,7 @@ import qualified Ledger.Interval     as Interval
 import CardanoTx.Models (TxCandidate (..), TxOutCandidate (..), mkPkhTxIn, ChangePolicy (ReturnTo), getAddress, TxOutDatum (EmptyDatum), FullTxOut (..))
 import Explorer.Service (Explorer(..))
 import Spectrum.Prelude.Throw (throwMaybe, throwEither)
-import SubmitHttpApi.Models.TxCreationErrors (TxCreationErrors(CouldNotRetrieveSpfBox, CouldNotParseAddress))
+import SubmitHttpApi.Models.TxCreationErrors (TxCreationErrors(CouldNotRetrieveSpfBox, CouldNotParseAddress, CouldNotCollectInputsToCoverAdaBalance))
 import SubmitHttpApi.Config.AppConfig (AppConfig(..))
 import SubmitHttpApi.Models.Common (UserLBSPInfo(..))
 import qualified Explorer.Class    as Explorer
@@ -29,34 +29,41 @@ import qualified Ledger.Value                as Value
 import Ledger.Value (AssetClass(AssetClass))
 import SubmitAPI.Service (Transactions(..))
 import Ledger (txId)
+import System.Logging.Hlog (Logging(..))
+import WalletAPI.Utxos (WalletOutputs(..))
 
 data TransactionBuilder m = TransactionBuilder
   { createTx :: TxCreationRequest -> m (C.TxId, Int)
   }
 
-mkTransactionBuilder :: (MonadIO m, MonadThrow m) => AppConfig -> Explorer m -> Transactions m C.BabbageEra -> TransactionBuilder m
-mkTransactionBuilder cfg explorer txs =
+mkTransactionBuilder :: (MonadIO m, MonadThrow m) => Logging m -> AppConfig -> Explorer m -> Transactions m C.BabbageEra -> WalletOutputs m -> TransactionBuilder m
+mkTransactionBuilder logging cfg explorer txs wo =
   TransactionBuilder {
-    createTx = createTx' cfg explorer txs
+    createTx = createTx' logging cfg explorer txs wo
   }
 
-createTx' :: (MonadIO m, MonadThrow m) => AppConfig -> Explorer m -> Transactions m C.BabbageEra -> TxCreationRequest -> m (C.TxId, Int)
-createTx' cfg explorer Transactions{..} req@TxCreationRequest{..} = do
-  (candidate, spfOutIdx) <- createTxCandidate cfg explorer req
+createTx' :: (MonadIO m, MonadThrow m) => Logging m -> AppConfig -> Explorer m -> Transactions m C.BabbageEra -> WalletOutputs m -> TxCreationRequest -> m (C.TxId, Int)
+createTx' Logging{..} cfg explorer Transactions{..} wo req@TxCreationRequest{..} = do
+  (candidate, spfOutIdx) <- createTxCandidate cfg explorer wo req
+  infoM $ "Tx candidate:" ++ show candidate
   tx            <- finalizeTx candidate
   transactionId <- submitTx tx
   pure (transactionId, spfOutIdx)
 
-createTxCandidate :: (MonadIO m, MonadThrow m) => AppConfig -> Explorer m -> TxCreationRequest -> m (TxCandidate, Int)
-createTxCandidate cfg@AppConfig{..} Explorer{..} req@TxCreationRequest{..} = do
+createTxCandidate :: (MonadIO m, MonadThrow m) => AppConfig -> Explorer m -> WalletOutputs m -> TxCreationRequest -> m (TxCandidate, Int)
+createTxCandidate cfg@AppConfig{..} Explorer{..} WalletOutputs{..} req@TxCreationRequest{..} = do
   spfBoxM <- getOutput spfBoxId
   spfBoxE <- throwMaybe (CouldNotRetrieveSpfBox spfBoxId) spfBoxM
+  let
+    spfBox     = Explorer.toCardanoTx spfBoxE
+    coverValue = adaValueToCoverTx req
+  inputsToCoverAdaM <- selectUtxosStrict coverValue
+  inputsToCoverAda  <- throwMaybe CouldNotCollectInputsToCoverAdaBalance inputsToCoverAdaM
   outputs <- mkOutput cfg `traverse` userLBSPInfos
   let
-    spfBox      = Explorer.toCardanoTx spfBoxE
     txOutputs   = outputs ++ [produceNexSpfBoxCandidate cfg spfBox req]
     txCandidate = TxCandidate
-      { txCandidateInputs       = Set.fromList [mkPkhTxIn spfBox]
+      { txCandidateInputs       = Set.union (Set.fromList [mkPkhTxIn spfBox])  (Set.fromList $ Set.toList inputsToCoverAda <&> mkPkhTxIn)
       , txCandidateRefIns       = []
       , txCandidateOutputs      = txOutputs
       , txCandidateValueMint    = mempty
@@ -66,6 +73,14 @@ createTxCandidate cfg@AppConfig{..} Explorer{..} req@TxCreationRequest{..} = do
       , txCandidateSigners      = mempty
       }
   pure (txCandidate, RIO.length txOutputs)
+
+adaValueToCoverTx :: TxCreationRequest -> FullTxOut -> Value
+adaValueToCoverTx TxCreationRequest{..} spfBox =
+  let
+    adaValueInSpfBox = Value.valueOf (fullTxOutValue spfBox) Ada.adaSymbol Ada.adaToken
+    freeAdaValue = if adaValueInSpfBox > 5 then adaValueInSpfBox - 2 else 0
+    emptyAdaValue = Value.singleton Ada.adaSymbol Ada.adaToken (negate freeAdaValue)
+  in Prelude.foldl (\acc UserLBSPInfo{..} -> acc <> Value.singleton Ada.adaSymbol Ada.adaToken providedAda) emptyAdaValue userLBSPInfos
 
 produceNexSpfBoxCandidate :: AppConfig -> FullTxOut -> TxCreationRequest -> TxOutCandidate
 produceNexSpfBoxCandidate AppConfig{..} FullTxOut{..} TxCreationRequest{..} =

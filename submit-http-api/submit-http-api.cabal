@@ -107,6 +107,7 @@ library
                   , containers
                   , text
                   , submit-api
+                  , haskeline
                   , bytestring
                   , streamly
                   , hw-kafka-client

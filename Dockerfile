@@ -23,10 +23,10 @@ ENV LC_ALL en_US.UTF-8
 
 # Preparing binary to run in container. 
 WORKDIR /cardano-markets-tracker
-COPY temp-build/tracker-app /cardano-markets-tracker/
-COPY tracker/resources/config.dhall /etc/cardano-markets-tracker/
+COPY temp-build/submit-http-api-app /cardano-submit-http-api/
+COPY submit-http-api/resources/config.dhall /etc/cardano-submit-http-api/
 RUN mkdir ./logs
 
-ENV ENV_CONFIG "/etc/cardano-markets-tracker/config.dhall"
+ENV ENV_CONFIG "/etc/cardano-submit-http-api/config.dhall"
 
-ENTRYPOINT /cardano-markets-tracker/tracker-app ${ENV_CONFIG}
+ENTRYPOINT /cardano-submit-http-api/submit-http-api-app ${ENV_CONFIG}

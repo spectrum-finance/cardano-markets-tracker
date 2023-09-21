@@ -5,7 +5,8 @@ import RIO
 
 data TxCreationErrors =
     CouldNotRetrieveSpfBox TxOutRef |
-    CouldNotParseAddress Text
+    CouldNotParseAddress Text |
+    CouldNotCollectInputsToCoverAdaBalance
     deriving (Generic, Show)
 
 instance Exception TxCreationErrors
