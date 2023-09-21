@@ -56,8 +56,8 @@ createTxCandidate cfg@AppConfig{..} Explorer{..} WalletOutputs{..} req@TxCreatio
   spfBoxE <- throwMaybe (CouldNotRetrieveSpfBox spfBoxId) spfBoxM
   let
     spfBox     = Explorer.toCardanoTx spfBoxE
-    coverValue = adaValueToCoverTx req
-  inputsToCoverAdaM <- selectUtxosStrict coverValue
+    coverValue = adaValueToCoverTx req spfBox
+  inputsToCoverAdaM <- selectUtxosStrict coverValue 
   inputsToCoverAda  <- throwMaybe CouldNotCollectInputsToCoverAdaBalance inputsToCoverAdaM
   outputs <- mkOutput cfg `traverse` userLBSPInfos
   let
