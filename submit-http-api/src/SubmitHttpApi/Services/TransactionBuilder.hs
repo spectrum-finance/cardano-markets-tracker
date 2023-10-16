@@ -14,7 +14,7 @@ import SubmitHttpApi.Config.AppConfig (AppConfig(..))
 import SubmitHttpApi.Models.Common (UserLBSPInfo(..))
 import qualified Explorer.Class    as Explorer
 import Plutus.V1.Ledger.Address (pubKeyHashAddress)
-import SubmitAPI.Config (DefaultChangeAddress(getChangeAddr))
+import SubmitAPI.Config (DefaultChangeAddress(getChangeAddr), FeePolicy (SplitBetween))
 import qualified Data.Text.Encoding      as E
 import qualified Ledger.Tx.CardanoAPI as Interop
 import Plutus.V2.Ledger.Api (Value)
@@ -31,6 +31,7 @@ import SubmitAPI.Service (Transactions(..))
 import Ledger (txId)
 import System.Logging.Hlog (Logging(..))
 import WalletAPI.Utxos (WalletOutputs(..))
+import Debug.Trace
 
 data TransactionBuilder m = TransactionBuilder
   { createTx :: TxCreationRequest -> m (C.TxId, Int)
@@ -46,7 +47,8 @@ createTx' :: (MonadIO m, MonadThrow m) => Logging m -> AppConfig -> Explorer m -
 createTx' Logging{..} cfg explorer Transactions{..} wo req@TxCreationRequest{..} = do
   (candidate, spfOutIdx) <- createTxCandidate cfg explorer wo req
   infoM $ "Tx candidate:" ++ show candidate
-  tx            <- finalizeTx candidate
+  let splitPolicy = SplitBetween $ userLBSPInfos <&> (\UserLBSPInfo{..} -> paymentAddress)
+  tx            <- finalizeTxWithExplFeePolicy splitPolicy candidate
   transactionId <- submitTx tx
   pure (transactionId, spfOutIdx)
 
@@ -57,11 +59,21 @@ createTxCandidate cfg@AppConfig{..} Explorer{..} WalletOutputs{..} req@TxCreatio
   let
     spfBox     = Explorer.toCardanoTx spfBoxE
     coverValue = adaValueToCoverTx req spfBox
-  inputsToCoverAdaM <- selectUtxosStrict coverValue 
+  Debug.Trace.traceM ("coverValue: " ++ show coverValue ++ ". Spf boxId:" ++ show spfBoxId)
+  inputsToCoverAdaM <- selectUtxosStrictLbsp coverValue
   inputsToCoverAda  <- throwMaybe CouldNotCollectInputsToCoverAdaBalance inputsToCoverAdaM
+  let 
+    emptyAdaValue = Value.singleton Ada.adaSymbol Ada.adaToken 0
+  Debug.Trace.traceM ("inputsToCoverAda: " ++ show inputsToCoverAda ++ ". Spf boxId:" ++ show spfBoxId)
+  Debug.Trace.traceM ("inputsToCoverAdaRealValut (withoutSpf): " ++ show (Prelude.foldl (\acc FullTxOut{..} -> acc <> fullTxOutValue) emptyAdaValue (inputsToCoverAda)) ++ ". Spf boxId:" ++ show spfBoxId)
+  Debug.Trace.traceM ("inputsToCoverAdaRealValut (with Spf): " ++ show (Prelude.foldl (\acc FullTxOut{..} -> acc <> fullTxOutValue) emptyAdaValue ([spfBox] ++ Set.toList inputsToCoverAda)) ++ ". Spf boxId:" ++ show spfBoxId)
   outputs <- mkOutput cfg `traverse` userLBSPInfos
-  let
+  let 
     txOutputs   = outputs ++ [produceNexSpfBoxCandidate cfg spfBox req]
+  Debug.Trace.traceM ("Outputs ada (with Spf): " ++ show (Prelude.foldl (\acc TxOutCandidate {..} -> acc <> txOutCandidateValue) emptyAdaValue txOutputs) ++ ". Spf boxId:" ++ show spfBoxId)
+  adaValueInSpfBox <- pure $ Value.valueOf (fullTxOutValue spfBox) Ada.adaSymbol Ada.adaToken
+  Debug.Trace.traceM ("adaValueInSpfBox: " ++ show adaValueInSpfBox ++ ". Spf boxId:" ++ show spfBoxId)
+  let
     txCandidate = TxCandidate
       { txCandidateInputs       = Set.union (Set.fromList [mkPkhTxIn spfBox])  (Set.fromList $ Set.toList inputsToCoverAda <&> mkPkhTxIn)
       , txCandidateRefIns       = []
@@ -72,23 +84,25 @@ createTxCandidate cfg@AppConfig{..} Explorer{..} WalletOutputs{..} req@TxCreatio
       , txCandidateValidRange   = Interval.always
       , txCandidateSigners      = mempty
       }
-  pure (txCandidate, RIO.length txOutputs)
+  pure (txCandidate, (RIO.length txOutputs - 1))
 
 adaValueToCoverTx :: TxCreationRequest -> FullTxOut -> Value
 adaValueToCoverTx TxCreationRequest{..} spfBox =
   let
     adaValueInSpfBox = Value.valueOf (fullTxOutValue spfBox) Ada.adaSymbol Ada.adaToken
-    freeAdaValue = if adaValueInSpfBox > 5 then adaValueInSpfBox - 2 else 0
+    freeAdaValue = if adaValueInSpfBox > 5000000 then adaValueInSpfBox - 2000000 else 0
     emptyAdaValue = Value.singleton Ada.adaSymbol Ada.adaToken (negate freeAdaValue)
   in Prelude.foldl (\acc UserLBSPInfo{..} -> acc <> Value.singleton Ada.adaSymbol Ada.adaToken providedAda) emptyAdaValue userLBSPInfos
 
 produceNexSpfBoxCandidate :: AppConfig -> FullTxOut -> TxCreationRequest -> TxOutCandidate
 produceNexSpfBoxCandidate AppConfig{..} FullTxOut{..} TxCreationRequest{..} =
   let
+    adaValueInSpfBox = Value.valueOf fullTxOutValue Ada.adaSymbol Ada.adaToken
+    freeAdaValue = if adaValueInSpfBox > 5000000 then adaValueInSpfBox - 2000000 else 0
     spfTN = mkTokenName . mkByteString $ spfTokenName
     spfCS = mkCurrencySymbol . mkByteString $ spfPolicyId
     spfAC = Prelude.foldl (\acc UserLBSPInfo{..} -> acc <> Value.singleton spfCS spfTN (negate spfReward)) (Value.singleton spfCS spfTN 0) userLBSPInfos
-    newValue = fullTxOutValue <> spfAC
+    newValue = fullTxOutValue <> spfAC <> Value.singleton Ada.adaSymbol Ada.adaToken (negate freeAdaValue)
   in TxOutCandidate
       { txOutCandidateAddress   = fullTxOutAddress
       , txOutCandidateValue     = newValue
@@ -113,7 +127,7 @@ createValue AppConfig{..} UserLBSPInfo{..} =
     spfTN = mkTokenName . mkByteString $ spfTokenName
     spfCS = mkCurrencySymbol . mkByteString $ spfPolicyId
     spfAC = Value.singleton spfCS spfTN spfReward
-    adaAC = Value.singleton Ada.adaSymbol Ada.adaToken providedAda
+    adaAC = Value.singleton Ada.adaSymbol Ada.adaToken (providedAda - 250)
   in spfAC <> adaAC
 
 mkByteString :: T.Text -> BS.ByteString

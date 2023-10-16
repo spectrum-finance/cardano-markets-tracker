@@ -22,7 +22,7 @@ ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 
 # Preparing binary to run in container. 
-WORKDIR /cardano-markets-tracker
+WORKDIR /cardano-submit-api
 COPY temp-build/submit-http-api-app /cardano-submit-http-api/
 COPY submit-http-api/resources/config.dhall /etc/cardano-submit-http-api/
 RUN mkdir ./logs

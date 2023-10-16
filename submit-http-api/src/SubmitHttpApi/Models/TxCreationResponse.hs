@@ -5,7 +5,17 @@ import GHC.Generics
 import Data.Aeson 
   ( FromJSON, ToJSON )
 
-data TxCreationResponse = TxCreationResponse
+data TxCreationResponse = TxCreationSuccessResponse
   { txId     :: String 
   , spfBoxId :: Integer
-  } deriving (Generic, Eq, Show, FromJSON, ToJSON)
+  } | TxFailureResponse {
+    error :: String
+  } 
+  deriving (Generic, Eq, Show, FromJSON, ToJSON)
+
+-- data TxFailureResponse = TxFailureResponse String 
+
+-- data TxCreationSuccessResponse = TxCreationSuccessResponse
+--   { txId     :: String 
+--   , spfBoxId :: Integer
+--   } deriving (Generic, Eq, Show, FromJSON, ToJSON)

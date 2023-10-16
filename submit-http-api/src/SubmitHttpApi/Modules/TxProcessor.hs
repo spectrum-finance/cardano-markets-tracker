@@ -5,16 +5,18 @@ import SubmitHttpApi.Models.TxCreationResponse (TxCreationResponse(..))
 import System.Logging.Hlog (Logging(..), MakeLogging (..), makeLogging)
 import SubmitHttpApi.Services.TransactionBuilder (TransactionBuilder(..))
 import Data.Functor ((<&>))
+import RIO (handle, MonadUnliftIO, SomeException)
+import RIO.Prelude.Types (MonadThrow)
 
 data TxProcessor m = TxProcessor
   { processCreationRequest :: TxCreationRequest -> m TxCreationResponse
   }
 
-mkTxProcessor :: (Monad m) => MakeLogging m m -> TransactionBuilder m -> m (TxProcessor m)
+mkTxProcessor :: (Monad m, MonadThrow m, MonadUnliftIO m) => MakeLogging m m -> TransactionBuilder m -> m (TxProcessor m)
 mkTxProcessor MakeLogging{..} TransactionBuilder{..} = do
   logging <- forComponent "TxProcessor"
   pure $ attachLogging logging TxProcessor 
-    { processCreationRequest = \req -> createTx req <&> (\(txId, spfBoxIdx) -> TxCreationResponse (show txId) (fromIntegral spfBoxIdx))
+    { processCreationRequest = \req -> handle (\(e :: SomeException) -> pure $ TxFailureResponse (show e)) (createTx req <&> (\(txId, spfBoxIdx) -> TxCreationSuccessResponse (show txId) (fromIntegral spfBoxIdx)))
     }
 
 attachLogging :: Monad m => Logging m -> TxProcessor m -> TxProcessor m
