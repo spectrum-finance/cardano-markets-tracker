@@ -3,44 +3,18 @@ let format = "$time - $loggername - $prio - $msg" : Text
 let fileHandlers = \(path : Text) -> \(level : LogLevel) -> {_1 = path, _2 = level, _3 = format}
 let levelOverride = \(component : Text) -> \(level : LogLevel) -> {_1 = component, _2 = level}
 in
-{ txEventsProducerConfig =
+{ txEventsLedgerProducerConfig =
     { producerBrokers = ["127.0.0.1:19092"]
     , producerTimeout = 1000
     },
-  ordersProducerConfig =
+  txEventsLedgerTopicName = "tx-events-ledger",
+  txEventsMempoolProducerConfig =
     { producerBrokers = ["127.0.0.1:19092"]
     , producerTimeout = 1000
     },
-  poolsProducerConfig =
-    { producerBrokers = ["127.0.0.1:19092"]
-    , producerTimeout = 1000
-    },
-  mempoolOrdersProducerConfig =
-    { producerBrokers = ["127.0.0.1:19092"]
-    , producerTimeout = 1000
-    },
-  mempoolPoolsProducerConfig =
-    { producerBrokers = ["127.0.0.1:19092"]
-    , producerTimeout = 1000
-    },
-  lbspPoolsProducerConfig =
-    { producerBrokers = ["127.0.0.1:19092"]
-    , producerTimeout = 1000
-    },
-  txEventsTopicName = "tx-events",
-  ordersTopicName = "orders-topic",
-  poolsTopicName = "pools-topic-name",
-  lbspTopicName = "pools-topic-name",
-  mempoolOrdersTopicName = "mempool-orders-topic",
-  mempoolPoolsTopicName = "mempool-pools-topic",
+  txEventsMempoolTopicName = "tx-events-mempool",
   trackerProgrammConfig =
     { pollTime = 2
-    },
-  scriptsConfig =
-    { swapScriptPath    = "./scripts/swap.uplc"
-    , depositScriptPath = "./scripts/deposit.uplc"
-    , redeemScriptPath  = "./scripts/redeem.uplc"
-    , poolScriptPath    = "./scripts/pool.uplc"
     },
   retry =
     { sleepTime = 1000000
@@ -52,7 +26,7 @@ in
         }
     },
   lederHistoryConfig =
-    { storePath       = "./data/amm-executor"
+    { storePath       = "./data/tracker-v2"
     , createIfMissing = True
     },
   nodeConfigPath = "/home/bromel/projects/cardano-dex-backend/config/preview/config.json",
