@@ -22,23 +22,14 @@ import Spectrum.LedgerSync.Config
 
 data AppConfig = AppConfig
   { nodeSocketConfig             :: !NodeSocketConfig
-  , ordersProducerConfig         :: !KafkaProducerConfig
-  , poolsProducerConfig          :: !KafkaProducerConfig
-  , txEventsProducerConfig       :: !KafkaProducerConfig
-  , mempoolOrdersProducerConfig  :: !KafkaProducerConfig
-  , mempoolPoolsProducerConfig   :: !KafkaProducerConfig
-  , lbspProducerConfig           :: !KafkaProducerConfig
+  , txEventsLedgerProducerConfig       :: !KafkaProducerConfig
+  , txEventsMempoolProducerConfig       :: !KafkaProducerConfig
   , nodeConfigPath               :: !FilePath
-  , mempoolOrdersTopicName       :: !Text 
-  , mempoolPoolsTopicName        :: !Text
-  , ordersTopicName              :: !Text
-  , poolsTopicName               :: !Text
-  , txEventsTopicName            :: !Text
-  , lbspTopicName                :: !Text
+  , txEventsLedgerTopicName            :: !Text
+  , txEventsMempoolTopicName            :: !Text
   , loggingConfig                :: !LoggingConfig
   , eventSourceConfig            :: !EventSourceConfig
   , lederStoreConfig             :: !LedgerStoreConfig
-  , scriptsConfig                :: !ScriptsConfig
   } deriving (Generic)
 
 instance FromDhall AppConfig
