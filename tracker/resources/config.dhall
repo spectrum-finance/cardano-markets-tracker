@@ -18,11 +18,21 @@ in
   mempoolOrdersProducerConfig =
     { producerBrokers = ["127.0.0.1:19092"]
     , producerTimeout = 1000
-    },  
+    },
+  mempoolPoolsProducerConfig =
+    { producerBrokers = ["127.0.0.1:19092"]
+    , producerTimeout = 1000
+    },
+  lbspPoolsProducerConfig =
+    { producerBrokers = ["127.0.0.1:19092"]
+    , producerTimeout = 1000
+    },
   txEventsTopicName = "tx-events",
   ordersTopicName = "orders-topic",
   poolsTopicName = "pools-topic-name",
+  lbspTopicName = "pools-topic-name",
   mempoolOrdersTopicName = "mempool-orders-topic",
+  mempoolPoolsTopicName = "mempool-pools-topic",
   trackerProgrammConfig =
     { pollTime = 2
     },

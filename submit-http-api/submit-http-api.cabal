@@ -1,5 +1,5 @@
 cabal-version:      2.4
-name:               tracker
+name:               submit-http-api
 version:            0.1.0.0
 
 author:             spectrum
@@ -76,13 +76,15 @@ library
 
     hs-source-dirs: src
     
-    exposed-modules: Tracker.Models.AppConfig
-                     Tracker.Syntax.Option
-                     Tracker.Services.ConfigReader
-                     Tracker.App
-                     Tracker.Models.Interop.Wrappers
-                     Tracker.Models.OnChainEvent
-                     Tracker.Models.LBSPDatum
+    exposed-modules: SubmitHttpApi.App
+                   , SubmitHttpApi.Models.TxCreationRequest
+                   , SubmitHttpApi.Models.TxCreationResponse
+                   , SubmitHttpApi.Models.TxCreationErrors
+                   , SubmitHttpApi.Models.Common
+                   , SubmitHttpApi.Http.Server
+                   , SubmitHttpApi.Services.TransactionBuilder
+                   , SubmitHttpApi.Modules.TxProcessor
+                   , SubmitHttpApi.Config.AppConfig
 
     build-depends:  hashable
                   , dex-core
@@ -100,19 +102,28 @@ library
                   , aeson
                   , bytestring
                   , rio
+                  , wai
+                  , warp
+                  , containers
                   , text
+                  , submit-api
+                  , haskeline
                   , bytestring
                   , streamly
                   , hw-kafka-client
+                  , parsec
                   , dhall
                   , hlog
                   , retry
                   , streaming-kafka
+                  , network-api
+                  , base16-bytestring
                   , plutus-ledger-api
                   , extra
                   , spectrum-prelude
                   , ledger-sync
                   , io-classes
+                  , plutus-script-utils
                   , monad-control
                   , transformers-base
                   , stm
@@ -122,11 +133,17 @@ library
                   , contra-tracer
                   , serialise
                   , unix
+                  , servant
+                  , servant-client
+                  , servant-client-core
+                  , servant-foreign
+                  , servant-server
+                  , wallet-api
 
-executable tracker-app
+executable submit-http-api-app
     main-is: Main.hs
     build-depends:  base >= 4.9 && < 5
-                  , tracker
+                  , submit-http-api
                   , rio
     hs-source-dirs:   app
     default-language: Haskell2010
